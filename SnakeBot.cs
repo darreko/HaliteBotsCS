@@ -26,7 +26,7 @@ public class SnakeBot
         {
             var map = Networking.getInit(out _MyID);
             DarreksLog.LogFileName = String.Format("log{0}.txt", _MyID);
-            //_MaxScanDistance = (ushort)(map.Width / 4);
+            _MaxScanDistance = (ushort)(map.Width / 4);
 
 
 
@@ -44,6 +44,7 @@ public class SnakeBot
                 for (ushort x = 0; x < map.Width; x++)
                 {
                     var prodVal = map[x, y].Production;
+
                     sb.Append(prodVal + " ");
 
                     if (_MaxProductionValue < prodVal)
@@ -51,7 +52,7 @@ public class SnakeBot
                 }
             }
 
-            DarreksLog.AppendLog(sb.ToString());
+            //DarreksLog.AppendLog(sb.ToString());
 
             _TopProductionValuesGreaterThan = (ushort)(_MaxProductionValue * .75);
 
@@ -69,7 +70,6 @@ public class SnakeBot
 
 
 
-
             LinkedList<Location> currentSnakePath = null;
             bool currentSnakePathIsCompleted = true;
 
@@ -77,7 +77,36 @@ public class SnakeBot
                 Do more prep work, see rules for time limit
             ------ */
 
+            sb.Clear();
+            sb.Append("Value to Me:");
+            var valueMap = new short[map.Width, map.Height];
+            for (ushort y = 0; y < map.Height; y++)
+            {
+                sb.Append("\r\n");
+                for (ushort x = 0; x < map.Width; x++)
+                {
+                    var activeSite = map[x, y];
+                    valueMap[x, y] = GetValueOfSite(activeSite);
+                    sb.Append(valueMap[x, y] + " ");
+                }
+            }
+            //DarreksLog.AppendLog(sb.ToString());
 
+            var gaussianValueMap = GetGaussianValueMap(valueMap, map.Width, map.Height);
+
+            sb.Clear();
+            sb.Append("Gaussian Values:");
+            for (ushort y = 0; y < map.Height; y++)
+            {
+                sb.Append("\r\n");
+                for (ushort x = 0; x < map.Width; x++)
+                {
+                    sb.Append(gaussianValueMap[x, y] + " ");
+                }
+            }
+
+            DarreksLog.AppendLog(sb.ToString());
+            
             Networking.SendInit(MyBotName); // Acknoweldge the init and begin the game
 
             var random = new Random();
@@ -146,12 +175,12 @@ public class SnakeBot
                         : currentSnakePath.Last.Value;
 
                     DarreksLog.AppendLog(string.Format("Starting at {0},{1}", snakeStartLocation.X, snakeStartLocation.Y));
-                    var snakeDestination = GetNearestFreeHighProductionDirection(map, snakeStartLocation);
+                    var snakeDestination = GetNearestFreeHighProductionDirection(map, gaussianValueMap, snakeStartLocation);
                     DarreksLog.AppendLog(string.Format("Snake Destination Set to {0},{1}. Production there is {2}", snakeDestination.X, snakeDestination.Y, map[snakeDestination].Production));
 
                     DarreksLog.AppendLog("Getting Snake's Best Path To Destination...");
 
-                    var newPathBits = GetBestPathToLocation(map, snakeStartLocation, snakeDestination);
+                    var newPathBits = GetBestPathToLocation(map, gaussianValueMap, snakeStartLocation, snakeDestination);
                     if (currentSnakePath == null)
                     {
                         currentSnakePath = newPathBits;
@@ -198,79 +227,17 @@ public class SnakeBot
                         foreach (var node in currentSnakePath)
                             DarreksLog.AppendLog(string.Format("{0},{1}", node.X, node.Y));
                     }
+                    
+                    DarreksLog.AppendLog(string.Format("The New Snake Path is {0} feet long!", currentSnakePath.Count));
                 }
 
                 #endregion
 
+                #region Snake Movement
 
-                //loop through the desired path. Move all those pieces along the path.
+                currentSnakePathIsCompleted = MakeSnakeMovements(currentSnakePath, map, currentSnakePathIsCompleted, moves);
 
-                if (currentSnakePath == null)
-                {
-                    DarreksLog.AppendLog("It appears we have a bug.");
-                }
-
-                DarreksLog.AppendLog("Performing Snake Movement...");
-                DarreksLog.AppendLog(string.Format("The snake is {0} feet long!", currentSnakePath.Count));
-
-
-
-                var positionOnPath = currentSnakePath.Last;
-                if (map[positionOnPath.Value].Owner == _MyID)
-                {
-                    DarreksLog.AppendLog("It appears we have navigated to the destination! HUZZAH!");
-                    currentSnakePathIsCompleted = true;
-                }
-                else
-                {
-                    while (positionOnPath != null)
-                    {
-                        var activeSite = map[positionOnPath.Value];
-                        //if a site on the path is mine, move it along the path if strong enough.
-                        if (activeSite.Owner == _MyID)
-                        {
-                            var thisGuysDestination = positionOnPath.Next;
-
-                            if ((thisGuysDestination == null) || (activeSite.Strength == 0))
-                            {
-
-                            }
-                            else
-                            {
-                                var dir = GetMoveDirection(map, positionOnPath.Value, thisGuysDestination.Value);
-                                var destinationSite = GetNeighbor(map, positionOnPath.Value, dir);
-
-                                if ((destinationSite.Owner != _MyID && destinationSite.Strength > activeSite.Strength) || (activeSite.Strength < activeSite.Production * 3))
-                                {
-                                    DarreksLog.AppendLog(string.Format("Staying Here at {0},{1}.", positionOnPath.Value.X, positionOnPath.Value.Y));
-
-                                    //Don't move if this will kill the site. 
-                                    //Also don't move if we are super small.
-                                    //Need to add a still move to override other movements if they exist.
-                                    moves.Add(new Move
-                                    {
-                                        Location = positionOnPath.Value,
-                                        Direction = Direction.Still
-                                    });
-                                }
-                                else
-                                {
-                                    DarreksLog.AppendLog(string.Format("Moving {2} from {0},{1}.", positionOnPath.Value.X, positionOnPath.Value.Y, dir));
-                                    moves.Add(new Move
-                                    {
-                                        Location = positionOnPath.Value,
-                                        Direction = dir
-                                    });
-                                }
-                            }
-                        }
-
-                        positionOnPath = positionOnPath.Previous;
-                    }
-                }
-
-
-                DarreksLog.AppendLog("Done Performing Snake Movement.");
+                #endregion Snake Movement
 
                 Networking.SendMoves(moves); // Send moves
 
@@ -280,6 +247,122 @@ public class SnakeBot
         {
             DarreksLog.AppendLog("Exception Happened: " + ex.Message + "\r\nat\r\n" + ex.StackTrace);
         }
+    }
+
+    public static short[,] GetGaussianValueMap(short[,] valueMap, ushort width, ushort height)
+    {
+        var gaussianValueMap = new short[width, height];
+
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+
+                var westValue = valueMap[(x - 1 + width)%width, y];
+                var eastValue = valueMap[(x + 1) % width, y];
+                var northValue = valueMap[x, (y - 1 + height) % height];
+                var southValue = valueMap[x, (y + 1) % height];
+                var value = valueMap[x, y];
+
+                int gaussianValue = value + westValue + eastValue + northValue + southValue;
+                if (gaussianValue < short.MinValue)
+                    gaussianValue = short.MinValue;
+                if (gaussianValue > short.MaxValue)
+                    gaussianValue = short.MaxValue;
+
+                gaussianValueMap[x, y] = (short)gaussianValue;
+            }
+        }
+
+        return gaussianValueMap;
+    }
+
+    private static bool MakeSnakeMovements(LinkedList<Location> currentSnakePath, Map map, bool currentSnakePathIsCompleted, HashSet<Move> moves)
+    {
+        var numberOfFeetToTrimSnake = 0;
+
+        if (currentSnakePath == null)
+        {
+            DarreksLog.AppendLog("SnakePath cannot be null.");
+        }
+
+        DarreksLog.AppendLog("Performing Snake Movement...");
+
+        var positionOnPath = currentSnakePath.Last;
+        if (map[positionOnPath.Value].Owner == _MyID)
+        {
+            DarreksLog.AppendLog("It appears we have navigated to the destination! HUZZAH!");
+            currentSnakePathIsCompleted = true;
+        }
+        else
+        {
+            var numSnakePieces = 0;
+
+            while (positionOnPath != null)
+            {
+                var activeSite = map[positionOnPath.Value];
+                //if a site on the path is mine, move it along the path if strong enough.
+                if (activeSite.Owner == _MyID)
+                {
+                    var thisGuysDestination = positionOnPath.Next;
+
+                    if ((thisGuysDestination == null) || (activeSite.Strength == 0))
+                    {
+                        //Don't move a snake that doesn't have any strength.
+                    }
+                    else
+                    {
+                        numSnakePieces++;
+
+                        if (numSnakePieces > MAX_SNAKE_LENGTH)
+                            numberOfFeetToTrimSnake++;
+
+                        var dir = GetMoveDirection(map, positionOnPath.Value, thisGuysDestination.Value);
+                        var destinationSite = GetNeighbor(map, positionOnPath.Value, dir);
+
+                        if ((destinationSite.Owner != _MyID && destinationSite.Strength > activeSite.Strength) ||
+                            (activeSite.Strength < activeSite.Production*3))
+                        {
+                            DarreksLog.AppendLog(string.Format("Staying Here at {0},{1}.", positionOnPath.Value.X,
+                                positionOnPath.Value.Y));
+
+                            //Don't move if this will kill the site. 
+                            //Also don't move if we are super small.
+                            //A still move to override other movements if they exist.
+                            moves.Add(new Move
+                            {
+                                Location = positionOnPath.Value,
+                                Direction = Direction.Still
+                            });
+                        }
+                        else
+                        {
+                            DarreksLog.AppendLog(string.Format("Moving {2} from {0},{1}.", positionOnPath.Value.X,
+                                positionOnPath.Value.Y, dir));
+                            moves.Add(new Move
+                            {
+                                Location = positionOnPath.Value,
+                                Direction = dir
+                            });
+                        }
+                    }
+                }
+
+                positionOnPath = positionOnPath.Previous;
+            }
+
+            DarreksLog.AppendLog(string.Format("The Snake is {0} feet long!", numSnakePieces));
+        }
+
+        if (numberOfFeetToTrimSnake > 0)
+        {
+            DarreksLog.AppendLog(string.Format("The Snake is too long. Trimming by {0} Feet", numberOfFeetToTrimSnake));
+            for (var i = 0; i < numberOfFeetToTrimSnake; i++)
+                currentSnakePath.RemoveFirst();
+        }
+
+        DarreksLog.AppendLog("Done Performing Snake Movement.");
+        return currentSnakePathIsCompleted;
     }
 
     private static Move? GetProductionSeekerBotMove(Map map, ushort x, ushort y)
@@ -445,8 +528,18 @@ public class SnakeBot
         return Direction.Still;
     }
 
-    private static LinkedList<Location> GetBestPathToLocation(Map map, Location startLocation, Location destinationLocation)
+    public static LinkedList<Location> GetBestPathToLocation(Map map, short[,] gaussianValueMap, Location startLocation, Location destinationLocation)
     {
+        //var path = Pathing.FindQuickestPath(gaussianValueMap, new Tuple<int, int>(startLocation.X, startLocation.Y),
+        //    new Tuple<int, int>(destinationLocation.X, destinationLocation.Y));
+
+
+
+
+        //could use solely the sites in a box surrounding the start and destination, then grabbing the smallest 
+
+
+
         //TODO: find cheapest route.
         DarreksLog.AppendLog(string.Format("Getting Best Path From {0},{1} to {2},{3}...", startLocation.X, startLocation.Y, destinationLocation.X, destinationLocation.Y));
 
@@ -463,42 +556,93 @@ public class SnakeBot
             var crossesMapEdgeY = false;
 
             if (Math.Abs(xDistance) > map.Width/2)
-            {
-                DarreksLog.AppendLog("The path will cross the map edge horizontally.");
                 crossesMapEdgeX = true;
-            }
             if (Math.Abs(yDistance) > map.Height/2)
-            {
-                DarreksLog.AppendLog("The path will cross the map edge vertically.");
                 crossesMapEdgeY = true;
-            }
+
+            DarreksLog.AppendLog(string.Format("From {0},{1} to {2},{3}...", positionOnPath.X, positionOnPath.Y, destinationLocation.X, destinationLocation.Y));
+            DarreksLog.AppendLog(string.Format("xDistance = {0}, yDistance = {1}, crossesXEdge = {2}, crossesYEdge = {3}", xDistance, yDistance, crossesMapEdgeX, crossesMapEdgeY));
+
+
+            Location? potentialPositionMovingHorizontally = null;
+            Location? potentialPositionMovingVertically = null;
 
             if (xDistance != 0)
             {
-                if (!crossesMapEdgeX && positionOnPath.X < destinationLocation.X)
-                    path.AddAfter(path.Last, new Location((ushort) ((positionOnPath.X + 1 + map.Width) % map.Width), positionOnPath.Y));
+                bool moveWest = false;
+
+                if (positionOnPath.X > destinationLocation.X)
+                {
+                    DarreksLog.AppendLog("The destination is to the west.");
+                    moveWest = !crossesMapEdgeX;
+                }
                 else
-                    path.AddAfter(path.Last, new Location((ushort) ((positionOnPath.X - 1 + map.Width) % map.Width), positionOnPath.Y));
+                {
+
+                    DarreksLog.AppendLog("The destination is to the east.");
+                    moveWest = crossesMapEdgeX;
+                }
+
+                DarreksLog.AppendLog(string.Format("I am {0}moving to the west", moveWest ? "" : "not "));
+
+                if (!moveWest)
+                    potentialPositionMovingHorizontally = new Location((ushort)((positionOnPath.X + 1 + map.Width) % map.Width), positionOnPath.Y);
+                else
+                    potentialPositionMovingHorizontally = new Location((ushort)((positionOnPath.X - 1 + map.Width) % map.Width), positionOnPath.Y);
             }
-            else if (yDistance != 0)
+            if (yDistance != 0)
             {
-                if (!crossesMapEdgeY && positionOnPath.Y < destinationLocation.Y)
-                    path.AddAfter(path.Last, new Location(positionOnPath.X, (ushort) ((positionOnPath.Y + 1 + map.Height) % map.Height)));
+                bool moveNorth = false;
+
+                if (positionOnPath.Y > destinationLocation.Y)
+                {
+                    DarreksLog.AppendLog("The destination is to the north.");
+                    moveNorth = !crossesMapEdgeY;
+                }
                 else
-                    path.AddAfter(path.Last, new Location(positionOnPath.X, (ushort) ((positionOnPath.Y - 1 + map.Height) % map.Height)));
+                {
+
+                    DarreksLog.AppendLog("The destination is to the south.");
+                    moveNorth = crossesMapEdgeY;
+                }
+                
+                DarreksLog.AppendLog(string.Format("I am {0}moving to the north", moveNorth ? "" : "not "));
+
+                if (!moveNorth)
+                    potentialPositionMovingVertically = new Location(positionOnPath.X, (ushort)((positionOnPath.Y + 1 + map.Height) % map.Height));
+                else
+                    potentialPositionMovingVertically = new Location(positionOnPath.X, (ushort)((positionOnPath.Y - 1 + map.Height) % map.Height));
             }
+
+            if (potentialPositionMovingHorizontally.HasValue && potentialPositionMovingVertically.HasValue)
+            {
+                //Make a decision here to go vertically or horizontally first.
+                var verticalMoveValue =
+                    gaussianValueMap[potentialPositionMovingVertically.Value.X, potentialPositionMovingVertically.Value.Y];
+                var horizontalMoveValue =
+                    gaussianValueMap[potentialPositionMovingHorizontally.Value.X, potentialPositionMovingHorizontally.Value.Y];
+
+                if (verticalMoveValue > horizontalMoveValue)
+                    path.AddAfter(path.Last, potentialPositionMovingVertically.Value);
+                else
+                    path.AddAfter(path.Last, potentialPositionMovingHorizontally.Value);
+            }
+            else if (potentialPositionMovingVertically.HasValue)
+            {
+                path.AddAfter(path.Last, potentialPositionMovingVertically.Value);
+            }
+            else if (potentialPositionMovingHorizontally.HasValue)
+            {
+                path.AddAfter(path.Last, potentialPositionMovingHorizontally.Value);
+            }
+            
             positionOnPath = path.Last.Value;
             DarreksLog.AppendLog(string.Format("Added {0},{1} to Path.", positionOnPath.X, positionOnPath.Y));
         }
         return path;
     }
-
-    //private static ushort GetGaussianBlur(Map map, Location location, ushort blurSize)
-    //{
-
-    //}
-
-    private static Location GetNearestFreeHighProductionDirection(Map map, Location startLocation) //TODO: This needs to take into account the allowed directions.
+    
+    private static Location GetNearestFreeHighProductionDirection(Map map, short[,] gaussianValueMap, Location startLocation) //TODO: This needs to take into account the allowed directions.
     {
         //I think it should value the production as Max production value - distance * 2.... 
         //A production value of 10 that is 5 spaces away would be valued at 10 - (5*2) = 0
@@ -530,12 +674,21 @@ public class SnakeBot
                 {
                     //TODO: return this to normal... just for testing I am making this find the closest production zone to me with the max production.
 
-                    var valueToMe = (short)(toCheck.Production - ((Math.Abs(x) + Math.Abs(y)) * 0.4));
+                    short valueToMe;
+                    var temp = (gaussianValueMap[mapX, mapY] - (35 * ((Math.Abs(x) + Math.Abs(y))))); //No matter how awesome a location is, if it's too far away, you'll never get there.
+                    if (temp < short.MinValue)
+                        valueToMe = short.MinValue;
+                    else if (temp > short.MaxValue)
+                        valueToMe = short.MaxValue;
+                    else
+                        valueToMe = (short)temp; //(short)(toCheck.Production - ((Math.Abs(x) + Math.Abs(y)) * 0.6));
 
                     //DarreksLog.AppendLog(string.Format("This space has production {0}, and is valued to me at {1}", toCheck.Production, valueToMe));
 
                     if (valueToMe > valueAtBestDestination)
                     {
+                        DarreksLog.AppendLog(string.Format("This is the best site I've checked yet: {0},{1}. It has a gaussian value of {2} and a value to me of {3}!", mapX, mapY, gaussianValueMap[mapX, mapY], valueToMe));
+
                         bestDestination = new Location() { X = mapX, Y = mapY };
                         valueAtBestDestination = valueToMe;
                     }
@@ -550,6 +703,19 @@ public class SnakeBot
         }
 
         return bestDestination.Value;
+    }
+
+    //This is used to determine how worth it a given site is for taking
+    public static short GetValueOfSite(Site site)
+    {
+        if (site.Production == 0)
+            return (short)(short.MinValue + (MAX_STRENGTH - site.Strength));
+
+        var initialValue = site.Production * 100;
+
+        var timeToRegainStrength = site.Strength/site.Production;
+        var siteValue = initialValue - timeToRegainStrength;
+        return (short)siteValue;
     }
 
     private static bool NeighborInDirectionIsNonPlayer(Map map, SiteEx site, Direction d, ushort myID)
@@ -619,9 +785,9 @@ public static class DarreksLog
     }
     public static void AppendLog(string line)
     {
-        using (var sw = File.AppendText(LogFileName))
-        {
-            sw.WriteLine(line);
-        }
+        //using (var sw = File.AppendText(LogFileName))
+        //{
+        //    sw.WriteLine(line);
+        //}
     }
 }
